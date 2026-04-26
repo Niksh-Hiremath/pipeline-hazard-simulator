@@ -234,7 +234,7 @@ export function PipelineTrack({ result, currentCycle, config }: PipelineTrackPro
               {isVisible && display?.isStall && idCol >= 0 && (
                 <HazardZapper
                   widthPercent={100 / numCols}
-                  leftPercent={Math.min(idCol + 1, numCols - 1) * (100 / numCols)}
+                  leftPercent={Math.min(colIndex + 1, numCols - 1) * (100 / numCols)}
                 />
               )}
             </div>

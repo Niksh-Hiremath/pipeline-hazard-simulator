@@ -40,10 +40,30 @@ export type Hazard = {
   resolvedByForwarding: boolean;
 };
 
+export type StallDetail = {
+  instructionIndex: number;
+  cycle: number;
+  causedByProducers: number[];
+  registers: string[];
+};
+
+export type ForwardingDetail = {
+  producerIndex: number;
+  consumerIndex: number;
+  register: string;
+  fromStage: StageLabel;
+  toStage: StageLabel;
+  fromCycle: number;
+  toCycle: number;
+  isLoadUseForwarding: boolean;
+};
+
 export type SimulationResult = {
   schedules: InstructionSchedule[];
   hazards: Hazard[];
   totalCycles: number;
+  stallDetails: StallDetail[];
+  forwardingDetails: ForwardingDetail[];
 };
 
 export type ParseError = {
