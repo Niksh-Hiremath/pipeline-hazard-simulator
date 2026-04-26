@@ -78,41 +78,41 @@ export function AssemblyEditor({ value, onChange, onErrors }: AssemblyEditorProp
         EditorView.theme({
           '&': {
             height: '100%',
-            fontSize: '14px',
-            color: '#e4e4e7',
+            fontSize: '13px',
+            color: '#c8d6e5',
           },
           '.cm-content': {
             fontFamily: 'var(--font-geist-mono), monospace',
-            padding: '16px',
-            caretColor: '#c792ea',
+            padding: '12px',
+            caretColor: '#00d4ff',
           },
           '.cm-gutters': {
-            backgroundColor: '#18181b',
-            borderRight: '1px solid #27272a',
-            color: '#71717a',
+            backgroundColor: 'oklch(0.1 0.02 260)',
+            borderRight: '1px solid oklch(0.25 0.02 260 / 50%)',
+            color: 'oklch(0.4 0.02 260)',
           },
           '.cm-lineNumbers .cm-gutterElement': {
-            color: '#71717a',
-            padding: '0 8px 0 16px',
+            color: 'oklch(0.4 0.02 260)',
+            padding: '0 8px 0 12px',
           },
           '.cm-activeLine': {
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            backgroundColor: 'oklch(0.7 0.18 195 / 3%)',
           },
           '.cm-activeLineGutter': {
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+            backgroundColor: 'oklch(0.7 0.18 195 / 5%)',
           },
           '&.cm-focused .cm-cursor': {
-            borderLeftColor: '#c792ea',
+            borderLeftColor: '#00d4ff',
             borderLeftWidth: '2px',
           },
           '&.cm-focused .cm-selectionBackground, ::selection': {
-            backgroundColor: 'rgba(199, 146, 234, 0.2)',
+            backgroundColor: 'oklch(0.7 0.18 195 / 15%)',
           },
           '.cm-selectionBackground': {
-            backgroundColor: 'rgba(199, 146, 234, 0.2)',
+            backgroundColor: 'oklch(0.7 0.18 195 / 15%)',
           },
           '.cm-placeholder': {
-            color: '#71717a',
+            color: 'oklch(0.35 0.02 260)',
             fontStyle: 'italic',
           },
           '.cm-focused': {
@@ -151,8 +151,35 @@ export function AssemblyEditor({ value, onChange, onErrors }: AssemblyEditorProp
 
   return (
     <div
-      ref={editorRef}
-      className="h-full w-full overflow-auto rounded-lg border border-border bg-card"
-    />
+      className="h-full w-full flex flex-col overflow-hidden rounded-lg"
+      style={{
+        border: '1px solid oklch(0.3 0.02 260 / 50%)',
+        background: 'oklch(0.1 0.02 260)',
+      }}
+    >
+      {/* Terminal header */}
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0"
+        style={{
+          background: 'oklch(0.12 0.015 260)',
+          borderBottom: '1px solid oklch(0.25 0.02 260 / 50%)',
+        }}
+      >
+        <div className="flex gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'oklch(0.6 0.22 25)' }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'oklch(0.75 0.15 85)' }} />
+          <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'oklch(0.7 0.2 155)' }} />
+        </div>
+        <span
+          className="text-[10px] font-medium tracking-wide ml-1"
+          style={{ color: 'oklch(0.45 0.02 260)', fontFamily: 'var(--font-geist-mono), monospace' }}
+        >
+          assembly.asm
+        </span>
+      </div>
+
+      {/* Editor body */}
+      <div ref={editorRef} className="flex-1 overflow-auto" />
+    </div>
   );
 }
