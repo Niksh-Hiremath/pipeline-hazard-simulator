@@ -111,14 +111,14 @@ export function PipelineTable({ result }: PipelineTableProps) {
   return (
     <div className="space-y-2">
       <div className="flex">
-        <div className="w-20 min-w-[80px] px-2 py-2 text-xs font-bold text-muted-foreground bg-muted/30 border-r border-border">
-          Instruction
-        </div>
         <div className="flex flex-1">
+          <div className="w-20 min-w-20 px-2 py-2 text-xs font-bold text-muted-foreground bg-muted/30 border-r border-border">
+            Instruction
+          </div>
           {Array.from({ length: result.totalCycles }, (_, i) => i + 1).map((cycle) => (
             <div
               key={cycle}
-              className="flex-1 min-w-[60px] px-2 py-2 text-xs font-mono text-center text-muted-foreground bg-muted/30 border-r border-border last:border-r-0"
+              className="flex-1 min-w-15 px-2 py-2 text-xs font-mono text-center text-muted-foreground bg-muted/30 border-r border-border last:border-r-0"
             >
               C{cycle}
             </div>

@@ -6,7 +6,11 @@
       "Bash(curl -s http://localhost:3000)",
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 11448)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(npx vitest *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(npx tsx *)"
     ]
   }
 }

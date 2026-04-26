@@ -7,67 +7,82 @@ function getPipelineStages(config: SimConfig): StageLabel[] {
     : [...PIPELINE_4_STAGE];
 }
 
-function isALU(op: Instruction['opcode']): boolean {
-  return op === 'ADD' || op === 'SUB';
+function getStageCount(config: SimConfig): number {
+  return config.pipelineType === '5-stage' ? 5 : 4;
 }
 
-function isLW(op: Instruction['opcode']): boolean {
-  return op === 'LW';
-}
+/**
+ * Core stall computation (cycle-accurate model).
+ *
+ * Key insight: IF cycles are always consecutive — instruction i always enters IF
+ * at cycle (i + 1). Stalls are inserted WITHIN a row between IF and ID, not as
+ * gaps before IF. This matches the real pipeline stall mechanism where the front-end
+ * is frozen while downstream stages drain.
+ *
+ * With ifStart[i] = i + 1:
+ *   idCycle[i]   = i + 1 + stalls[i] + 1 = i + stalls[i] + 2
+ *   exCycle[i]   = i + stalls[i] + 3
+ *   memCycle[i]  = i + stalls[i] + 4   (MEM in 5-stage, MEM/WB in 4-stage)
+ *   wbCycle[i]   = i + stalls[i] + 5   (WB in 5-stage only)
+ *   lastCycle[i] = i + stalls[i] + nStages
+ *
+ * Rules:
+ *   No forwarding:   consumer ID must be STRICTLY AFTER producer last stage
+ *                    → stalls[i] ≥ producerLastCycle − i − 1
+ *
+ *   Fwd, ALU→*:      consumer EX must be ≥ producer EX (non-strict, EX→EX forward)
+ *                    → stalls[i] ≥ producerExCycle − i − 3
+ *
+ *   Fwd, LW→*:       consumer EX must be STRICTLY AFTER producer MEM (MEM→EX forward)
+ *                    → stalls[i] ≥ producerMemCycle − i − 2
+ *
+ * Note: for chained hazards (producer itself has stalls), this naturally produces
+ * more stalls than the simplified textbook distance-based formula. This is the
+ * physically correct behaviour.
+ */
+function computeAllStalls(instructions: Instruction[], config: SimConfig): number[] {
+  const n = instructions.length;
+  const nStages = getStageCount(config);
+  const stalls: number[] = new Array(n).fill(0);
 
-function computeStalls(producer: Instruction, consumer: Instruction, config: SimConfig): number {
-  const producerIsALU = isALU(producer.opcode);
-  const producerIsLW = isLW(producer.opcode);
-  const consumerIsALU = isALU(consumer.opcode);
+  for (let i = 0; i < n; i++) {
+    const instr = instructions[i];
+    let minStalls = 0;
 
-  if (!config.forwardingEnabled) {
-    if (config.pipelineType === '5-stage') {
-      const distance = consumer.index - producer.index;
-      if (distance === 1) return 2;
-      if (distance === 2) return 1;
-      return 0;
-    } else {
-      const distance = consumer.index - producer.index;
-      if (distance === 1) return 1;
-      return 0;
+    for (let j = 0; j < i; j++) {
+      const prev = instructions[j];
+      if (prev.dest === null) continue;
+      if (prev.dest !== instr.src1 && prev.dest !== instr.src2) continue;
+
+      let required: number;
+
+      if (!config.forwardingEnabled) {
+        // producerLastCycle = (j+1) + stalls[j] + (nStages-1) = j + stalls[j] + nStages
+        const producerLastCycle = j + stalls[j] + nStages;
+        // consumerIdCycle = i + stalls[i] + 2 must be > producerLastCycle
+        // stalls[i] >= producerLastCycle - i - 1
+        required = producerLastCycle - i - 1;
+      } else if (prev.opcode === 'LW') {
+        // MEM→EX forwarding. producerMemCycle = j + stalls[j] + 4
+        // consumerExCycle = i + stalls[i] + 3 must be strictly > producerMemCycle
+        // stalls[i] > producerMemCycle - i - 3 → stalls[i] >= producerMemCycle - i - 2
+        const producerMemCycle = j + stalls[j] + 4;
+        required = producerMemCycle - i - 2;
+      } else {
+        // EX→EX forwarding (ALU producer). producerExCycle = j + stalls[j] + 3
+        // consumerExCycle = i + stalls[i] + 3 must be >= producerExCycle (non-strict)
+        // stalls[i] >= producerExCycle - i - 3
+        const producerExCycle = j + stalls[j] + 3;
+        required = producerExCycle - i - 3;
+      }
+
+      minStalls = Math.max(minStalls, required);
     }
+
+    stalls[i] = Math.max(0, minStalls);
   }
 
-  if (config.pipelineType === '5-stage') {
-    if (producerIsALU && consumerIsALU) {
-      return 0;
-    }
-    if (producerIsLW && consumerIsALU) {
-      const distance = consumer.index - producer.index;
-      if (distance === 1) return 1;
-      return 0;
-    }
-    return 0;
-  } else {
-    if (producerIsALU && consumerIsALU) {
-      return 0;
-    }
-    if (producerIsLW && consumerIsALU) {
-      const distance = consumer.index - producer.index;
-      if (distance === 1) return 1;
-      return 0;
-    }
-    return 0;
-  }
-}
-
-function hasRAWDependency(producer: Instruction, consumer: Instruction): boolean {
-  if (producer.dest === null) return false;
-  return producer.dest === consumer.src1 || producer.dest === consumer.src2;
-}
-
-function findRAWProducer(instructions: Instruction[], consumerIdx: number): Instruction | null {
-  for (let i = consumerIdx - 1; i >= 0; i--) {
-    if (hasRAWDependency(instructions[i], instructions[consumerIdx])) {
-      return instructions[i];
-    }
-  }
-  return null;
+  return stalls;
 }
 
 export function simulate(instructions: Instruction[], config: SimConfig): SimulationResult {
@@ -76,84 +91,128 @@ export function simulate(instructions: Instruction[], config: SimConfig): Simula
   }
 
   const stages = getPipelineStages(config);
-  const schedules: InstructionSchedule[] = [];
+  const nStages = getStageCount(config);
+
+  // --- Pass 1: Compute stall counts ---
+  const stalls = computeAllStalls(instructions, config);
+
+  // ifStart[i] = i + 1  (always consecutive, stalls are WITHIN the row)
+  const ifStart = instructions.map((_, i) => i + 1);
+
+  // Total cycles = end of last instruction's final stage
+  // lastCycle[i] = ifStart[i] + stalls[i] + (nStages - 1) = i + 1 + stalls[i] + nStages - 1 = i + stalls[i] + nStages
+  const totalCycles = Math.max(...instructions.map((_, i) => i + stalls[i] + nStages));
+
+  // --- Pass 2: Record hazards ---
   const hazards: Hazard[] = [];
-  let currentCycle = 1;
+  for (let i = 0; i < instructions.length; i++) {
+    const instr = instructions[i];
+    for (let j = 0; j < i; j++) {
+      const prev = instructions[j];
+      if (prev.dest === null) continue;
+      if (prev.dest !== instr.src1 && prev.dest !== instr.src2) continue;
 
-  for (let j = 0; j < instructions.length; j++) {
-    const instruction = instructions[j];
-    let earliestStart = currentCycle;
-
-    const producer = findRAWProducer(instructions, j);
-    if (producer) {
-      const stalls = computeStalls(producer, instruction, config);
-      earliestStart = Math.max(earliestStart, producer.index + stalls + 1);
-
-      const producerSchedule = schedules[producer.index];
-      if (producerSchedule) {
-        earliestStart = Math.max(earliestStart, producerSchedule.startCycle + stalls + 1);
+      // Stall count attributable to this specific producer-consumer pair
+      let pairStalls: number;
+      if (!config.forwardingEnabled) {
+        const producerLastCycle = j + stalls[j] + nStages;
+        pairStalls = Math.max(0, producerLastCycle - i - 1);
+      } else if (prev.opcode === 'LW') {
+        const producerMemCycle = j + stalls[j] + 4;
+        pairStalls = Math.max(0, producerMemCycle - i - 2);
+      } else {
+        const producerExCycle = j + stalls[j] + 3;
+        pairStalls = Math.max(0, producerExCycle - i - 3);
       }
 
       hazards.push({
-        producerIndex: producer.index,
-        consumerIndex: j,
-        register: producer.dest!,
-        stallsInserted: stalls,
-        resolvedByForwarding: config.forwardingEnabled && stalls === 0,
+        producerIndex: j,
+        consumerIndex: i,
+        register: prev.dest,
+        stallsInserted: pairStalls,
+        resolvedByForwarding: config.forwardingEnabled && pairStalls === 0,
       });
     }
+  }
 
-    const cycles: CycleEntry[] = [];
-    let cycle = earliestStart;
+  // --- Pass 3: Build pipeline table rows ---
+  const indexedSchedules: InstructionSchedule[] = [];
 
-    if (producer) {
-      const stalls = computeStalls(producer, instruction, config);
-      for (let s = 0; s < stalls; s++) {
-        cycles.push({
-          cycle: cycle++,
-          stage: 'STALL',
-          isStall: true,
-          isForwarded: false,
-        });
+  for (let i = 0; i < instructions.length; i++) {
+    const instr = instructions[i];
+    const start = ifStart[i];       // always i + 1
+    const stallCount = stalls[i];
+
+    // Special case: 4-stage LW→consumer with forwarding.
+    // The stall appears AT the EX slot (after IF and ID proceed normally).
+    // Row layout: IF | ID | STALL | EX | MEM/WB
+    // This only applies when LW is the most recent producer causing stalls.
+    const mostRecentProducer = (() => {
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = instructions[j];
+        if (prev.dest === null) continue;
+        if (prev.dest === instr.src1 || prev.dest === instr.src2) return prev;
+      }
+      return null;
+    })();
+
+    const isLWForward4Stage =
+      config.forwardingEnabled &&
+      config.pipelineType === '4-stage' &&
+      mostRecentProducer !== null &&
+      mostRecentProducer.opcode === 'LW' &&
+      stallCount > 0;
+
+    const cycleMap = new Map<number, { stage: StageLabel; isStall: boolean }>();
+
+    if (isLWForward4Stage) {
+      // IF and ID happen normally at their natural positions
+      cycleMap.set(start,     { stage: 'IF',     isStall: false });
+      cycleMap.set(start + 1, { stage: 'ID',     isStall: false });
+      // Stall appears at the EX slot
+      cycleMap.set(start + 2, { stage: 'STALL',  isStall: true  });
+      // EX and MEM/WB shifted one cycle later
+      cycleMap.set(start + 3, { stage: 'EX',     isStall: false });
+      cycleMap.set(start + 4, { stage: 'MEM/WB', isStall: false });
+    } else {
+      // Standard: IF first, then stallCount STALL bubbles, then remaining stages
+      cycleMap.set(start, { stage: 'IF', isStall: false });
+
+      let cursor = start + 1;
+      for (let s = 0; s < stallCount; s++) {
+        cycleMap.set(cursor++, { stage: 'STALL', isStall: true });
+      }
+      for (const stage of stages) {
+        if (stage === 'IF') continue;
+        cycleMap.set(cursor++, { stage: stage as StageLabel, isStall: false });
       }
     }
 
-    for (const stage of stages) {
-      let isForwarded = false;
-      if (config.forwardingEnabled && !producer?.dest) {
-        isForwarded = false;
-      } else if (config.forwardingEnabled && producer) {
-        const producerIsALU = isALU(producer.opcode);
-        const consumerIsALU = isALU(instruction.opcode);
-        if (producerIsALU && consumerIsALU) {
-          isForwarded = stage !== 'IF' && stage !== 'ID';
-        }
-      }
+    // Build sorted CycleEntry array
+    const cycleKeys = Array.from(cycleMap.keys()).sort((a, b) => a - b);
+    const cycles: CycleEntry[] = cycleKeys.map(cycle => {
+      const { stage, isStall } = cycleMap.get(cycle)!;
 
-      cycles.push({
-        cycle: cycle++,
-        stage,
-        isStall: false,
-        isForwarded,
-      });
-    }
+      // Mark EX as forwarded when any hazard for this instruction was resolved by forwarding
+      const isForwarded =
+        !isStall &&
+        stage === 'EX' &&
+        config.forwardingEnabled &&
+        hazards.some(h => h.consumerIndex === i && h.resolvedByForwarding);
 
-    schedules.push({
-      instruction,
-      cycles,
-      startCycle: earliestStart,
+      return { cycle, stage, isStall, isForwarded };
     });
 
-    currentCycle = earliestStart + 1;
+    indexedSchedules.push({
+      instruction: instr,
+      startCycle: start,
+      cycles,
+    });
   }
 
-  let totalCycles = 0;
-  for (const schedule of schedules) {
-    const lastCycle = schedule.cycles[schedule.cycles.length - 1];
-    if (lastCycle && lastCycle.cycle > totalCycles) {
-      totalCycles = lastCycle.cycle;
-    }
-  }
-
-  return { schedules, hazards, totalCycles };
+  return {
+    schedules: indexedSchedules,
+    hazards,
+    totalCycles,
+  };
 }

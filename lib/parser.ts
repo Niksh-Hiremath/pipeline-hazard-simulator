@@ -21,7 +21,7 @@ function parseLWSW(line: string, opcode: 'LW' | 'SW'): { dest: string | null; sr
   if (!match) return null;
   return {
     dest: opcode === 'LW' ? parseRegister(match[2]) : null,
-    src1: parseRegister(match[4]),
+    src1: opcode === 'SW' ? parseRegister(match[2]) : parseRegister(match[4]),
     src2: parseRegister(match[4]),
     offset: parseInt(match[3], 10),
   };
