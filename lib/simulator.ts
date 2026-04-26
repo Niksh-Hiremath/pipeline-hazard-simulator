@@ -70,10 +70,11 @@ function computeAllStalls(instructions: Instruction[], config: SimConfig): numbe
         required = producerMemCycle - i - 2;
       } else {
         // EX→EX forwarding (ALU producer). producerExCycle = j + stalls[j] + 3
-        // consumerExCycle = i + stalls[i] + 3 must be >= producerExCycle (non-strict)
-        // stalls[i] >= producerExCycle - i - 3
+        // consumerExCycle = i + stalls[i] + 3 must be STRICTLY AFTER producerExCycle
+        // (forwarding delivers result from end of EX, so consumer EX must start next cycle)
+        // stalls[i] > producerExCycle - i - 3 → stalls[i] >= producerExCycle - i - 2
         const producerExCycle = j + stalls[j] + 3;
-        required = producerExCycle - i - 3;
+        required = producerExCycle - i - 2;
       }
 
       minStalls = Math.max(minStalls, required);
@@ -121,8 +122,9 @@ export function simulate(instructions: Instruction[], config: SimConfig): Simula
         const producerMemCycle = j + stalls[j] + 4;
         pairStalls = Math.max(0, producerMemCycle - i - 2);
       } else {
+        // EX→EX forwarding: consumer EX must be strictly after producer EX
         const producerExCycle = j + stalls[j] + 3;
-        pairStalls = Math.max(0, producerExCycle - i - 3);
+        pairStalls = Math.max(0, producerExCycle - i - 2);
       }
 
       hazards.push({
@@ -156,24 +158,32 @@ export function simulate(instructions: Instruction[], config: SimConfig): Simula
       return null;
     })();
 
-    const isLWForward4Stage =
+    // Special case: LW→consumer with forwarding enabled (both 4-stage and 5-stage).
+    // The stall appears AFTER ID (between ID and EX), not after IF.
+    // 4-stage row: IF | ID | STALL | EX | MEM/WB
+    // 5-stage row: IF | ID | STALL | EX | MEM | WB
+    const isLWForwardStall =
       config.forwardingEnabled &&
-      config.pipelineType === '4-stage' &&
       mostRecentProducer !== null &&
       mostRecentProducer.opcode === 'LW' &&
       stallCount > 0;
 
     const cycleMap = new Map<number, { stage: StageLabel; isStall: boolean }>();
 
-    if (isLWForward4Stage) {
+    if (isLWForwardStall) {
       // IF and ID happen normally at their natural positions
-      cycleMap.set(start,     { stage: 'IF',     isStall: false });
-      cycleMap.set(start + 1, { stage: 'ID',     isStall: false });
-      // Stall appears at the EX slot
-      cycleMap.set(start + 2, { stage: 'STALL',  isStall: true  });
-      // EX and MEM/WB shifted one cycle later
-      cycleMap.set(start + 3, { stage: 'EX',     isStall: false });
-      cycleMap.set(start + 4, { stage: 'MEM/WB', isStall: false });
+      cycleMap.set(start, { stage: 'IF', isStall: false });
+      cycleMap.set(start + 1, { stage: 'ID', isStall: false });
+      // Stall(s) appear between ID and EX
+      let cursor = start + 2;
+      for (let s = 0; s < stallCount; s++) {
+        cycleMap.set(cursor++, { stage: 'STALL', isStall: true });
+      }
+      // Remaining stages after IF and ID
+      for (const stage of stages) {
+        if (stage === 'IF' || stage === 'ID') continue;
+        cycleMap.set(cursor++, { stage: stage as StageLabel, isStall: false });
+      }
     } else {
       // Standard: IF first, then stallCount STALL bubbles, then remaining stages
       cycleMap.set(start, { stage: 'IF', isStall: false });

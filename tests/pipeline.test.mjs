@@ -255,7 +255,7 @@ SUB R4, R1, R5
 
 // TC3 — LW→ALU immediate RAW
 // No fwd: 3 stalls (same as ALU→ALU in 5-stage)
-// Fwd:    MEM→EX forward → 1 stall → I2: IF @2, ID @4, EX @5, MEM @6, WB @7
+// Fwd:    MEM→EX forward → 1 stall AFTER ID → I2: IF @2, ID @3, STALL @4, EX @5, MEM @6, WB @7
 console.log('\n[TC3] LW→ALU immediate RAW');
 runTest('5-stage | no fwd | TC3', `
 LW R1, 0(R2)
@@ -269,7 +269,7 @@ LW R1, 0(R2)
 ADD R3, R1, R4
 `, cfg5(true), [
   [[1,'IF'],[2,'ID'],[3,'EX'],[4,'MEM'],[5,'WB']],
-  [[2,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
+  [[2,'IF'],[3,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
 ]);
 
 // TC4 — ALU + independent + consumer at distance 2
@@ -300,7 +300,7 @@ SW R1, 0(R7)
 //   I2 (i=1): stalls=3  → IF @2, ID @6, EX @7, MEM @8, WB @9
 //   I3 (i=2): I2.last=9, stalls=9-2-1=6 → IF @3, ID @10, EX @11, MEM @12, WB @13
 // Fwd:
-//   I2 (i=1): LW stall=1 → IF @2, ID @4, EX @5, MEM @6, WB @7
+//   I2 (i=1): LW stall=1 after ID → IF @2, ID @3, STALL @4, EX @5, MEM @6, WB @7
 //   I3 (i=2): I2.EX=5, stalls=5-2-3=0 → IF @3, ID @4, EX @5, MEM @6, WB @7
 console.log('\n[TC5] LW→ALU→ALU chain');
 runTest('5-stage | no fwd | TC5', `
@@ -318,7 +318,7 @@ ADD R3, R1, R4
 SUB R5, R3, R6
 `, cfg5(true), [
   [[1,'IF'],[2,'ID'],[3,'EX'],[4,'MEM'],[5,'WB']],
-  [[2,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
+  [[2,'IF'],[3,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
   [[3,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
 ]);
 
@@ -339,7 +339,7 @@ ADD R9, R8, R6
 SW R9, 0(R10)
 `, cfg5(true), [
   [[1,'IF'],[2,'ID'],[3,'EX'],[4,'MEM'],[5,'WB']],
-  [[2,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
+  [[2,'IF'],[3,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
   [[3,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
 ]);
 
@@ -366,7 +366,7 @@ SUB R5, R3, R6
 LW R7, 4(R2)
 `, cfg5(true), [
   [[1,'IF'],[2,'ID'],[3,'EX'],[4,'MEM'],[5,'WB']],
-  [[2,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
+  [[2,'IF'],[3,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
   [[3,'IF'],[4,'ID'],[5,'EX'],[6,'MEM'],[7,'WB']],
   [[4,'IF'],[5,'ID'],[6,'EX'],[7,'MEM'],[8,'WB']],
 ]);
